@@ -68,6 +68,7 @@ func (blobStore *s3BlobStore) NewClient(ctx context.Context) (BlobClient, error)
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 		if blobStore.options.EndpointResolverURI != "" {
 			o.EndpointResolver = s3.EndpointResolverFromURL(blobStore.options.EndpointResolverURI)
+			o.UsePathStyle = true
 		}
 	})
 	return &s3BlobClient{store: blobStore, ctx: ctx, client: client}, nil
