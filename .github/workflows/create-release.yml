@@ -4,7 +4,7 @@ on:
   push:
     # Sequence of patterns matched against refs/tags
     tags:
-      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+      - "v*" # Push events to matching v*, i.e. v1.0, v20.15.10
 
 jobs:
   build:
@@ -12,26 +12,13 @@ jobs:
 
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-latest, windows-latest]
-        arch: [amd64, arm64]
+        os: [windows-latest]
+        arch: [amd64]
         include:
-          - os: ubuntu-22.04
-            target: "./cmd/longtail/longtail"
-            platform: linux
-            tag: "${GITHUB_REF_NAME}"
-          - os: macos-latest
-            target: "./cmd/longtail/longtail"
-            platform: macos
-            tag: "${GITHUB_REF_NAME}"
           - os: windows-latest
             target: "./cmd/longtail/longtail.exe"
             platform: win32
             tag: "${env:GITHUB_REF_NAME}"
-        exclude:
-          - os: ubuntu-22.04
-            arch: arm64
-          - os: windows-latest
-            arch: arm64
 
     runs-on: ${{matrix.os}}
 
@@ -67,107 +54,58 @@ jobs:
           path: dist
 
   create-release:
-
     runs-on: ubuntu-22.04
 
     needs: [build]
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Download Linux artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: dist-linux-amd64
-        path: dist-linux-x64
+      - name: Download Win32 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-win32-amd64
+          path: dist-win32-x64
 
-    - name: Download MacOs x64 artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: dist-macos-amd64
-        path: dist-macos-x64
+      - name: Copy executables
+        run: |
+          cp dist-win32-x64/longtail.exe longtail.exe
 
-    - name: Download MacOs arm64 artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: dist-macos-arm64
-        path: dist-macos-arm64
+      - name: Zip Win32 artifacts
+        uses: montudor/action-zip@v0.1.0
+        with:
+          args: zip -qq -r ./win-x64.zip ./dist-win32-x64
 
-    - name: Download Win32 artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: dist-win32-amd64
-        path: dist-win32-x64
+      - name: Check prerelease
+        id: get-prerelease
+        uses: haya14busa/action-cond@v1
+        with:
+          cond: ${{contains(github.ref, '-pre')}}
+          if_true: "true"
+          if_false: "false"
 
-    - name: Set execute permission
-      run: |
-        chmod +x dist-linux-x64/longtail
-        chmod +x dist-macos-x64/longtail
-        chmod +x dist-macos-arm64/longtail
+      - name: Extract Version Changes
+        run: |
+          sed '1,/^##/!d;/##/d' CHANGELOG.md > CHANGELOG.tmp
 
-    - name: Copy executables
-      run: |
-        cp dist-linux-x64/longtail longtail-linux-x64
-        cp dist-macos-x64/longtail longtail-macos-x64
-        cp dist-win32-x64/longtail.exe longtail-win32-x64.exe
-        cp dist-macos-arm64/longtail longtail-macos-arm64
+      - name: Read CHANGELOG.tmp
+        id: read_changelog
+        uses: andstor/file-reader-action@v1
+        with:
+          path: "CHANGELOG.tmp"
 
-    - name: Zip Linux artifacts
-      uses: montudor/action-zip@v0.1.0
-      with:
-        args: zip -qq -r ./linux-x64.zip ./dist-linux-x64
-
-    - name: Zip MacOS x64 artifacts
-      uses: montudor/action-zip@v0.1.0
-      with:
-        args: zip -qq -r ./macos-x64.zip ./dist-macos-x64
-
-    - name: Zip MacOS arm64 artifacts
-      uses: montudor/action-zip@v0.1.0
-      with:
-        args: zip -qq -r ./macos-arm64.zip ./dist-macos-arm64
-
-    - name: Zip Win32 artifacts
-      uses: montudor/action-zip@v0.1.0
-      with:
-        args: zip -qq -r ./win32-x64.zip ./dist-win32-x64
-
-    - name: Check prerelease
-      id: get-prerelease
-      uses: haya14busa/action-cond@v1
-      with:
-        cond: ${{contains(github.ref, '-pre')}}
-        if_true: "true"
-        if_false: "false"
-
-    - name: Extract Version Changes
-      run: |
-        sed '1,/^##/!d;/##/d' CHANGELOG.md > CHANGELOG.tmp
-
-    - name: Read CHANGELOG.tmp
-      id: read_changelog
-      uses: andstor/file-reader-action@v1
-      with:
-        path: "CHANGELOG.tmp"
-
-    - name: Create Release
-      id: create_release
-      uses: softprops/action-gh-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{github.ref.name}}
-        body: |
-          ${{steps.read_changelog.outputs.contents}}
-        draft: false
-        prerelease: ${{steps.get-prerelease.outputs.value}}
-        files: |
-          win32-x64.zip
-          linux-x64.zip
-          macos-x64.zip
-          macos-arm64.zip
-          longtail-linux-x64
-          longtail-macos-x64
-          longtail-macos-arm64
-          longtail-win32-x64.exe
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{github.ref.name}}
+          body: |
+            ${{steps.read_changelog.outputs.contents}}
+          draft: false
+          prerelease: ${{steps.get-prerelease.outputs.value}}
+          files: |
+            win-x64.zip
+            longtail.exe
