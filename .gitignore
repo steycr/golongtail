@@ -21,3 +21,4 @@ cmd/longtail/longtail.exe
 cmd/longtail/longtail
 
 download-longtaillib-v*
+longtaillib/**

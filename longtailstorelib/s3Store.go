@@ -3,12 +3,16 @@ package longtailstorelib
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -59,17 +63,34 @@ func NewS3BlobStore(u *url.URL, opts ...BlobStoreOption) (BlobStore, error) {
 	return s, nil
 }
 
+type headerStripSigner struct {
+	inner *v4.Signer
+}
+
+func (s *headerStripSigner) SignHTTP(ctx context.Context, credentials aws.Credentials, r *http.Request, payloadHash string, service string, region string, signingTime time.Time, optFns ...func(*v4.SignerOptions)) error {
+	r.Header.Del("Amz-Sdk-Invocation-Id")
+	r.Header.Del("Amz-Sdk-Request")
+	r.Header.Del("Accept-Encoding")
+	return s.inner.SignHTTP(ctx, credentials, r, payloadHash, service, region, signingTime, optFns...)
+}
+
 func (blobStore *s3BlobStore) NewClient(ctx context.Context) (BlobClient, error) {
 	const fname = "s3BlobStore.NewClient"
-	cfg, err := config.LoadDefaultConfig(ctx)
+	tr := &http.Transport{
+		TLSNextProto: map[string]func(string, *tls.Conn) http.RoundTripper{},
+	}
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithHTTPClient(&http.Client{Transport: tr}),
+	)
 	if err != nil {
 		return nil, errors.Wrap(err, fname)
 	}
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 		if blobStore.options.EndpointResolverURI != "" {
-			o.EndpointResolver = s3.EndpointResolverFromURL(blobStore.options.EndpointResolverURI)
+			o.BaseEndpoint = aws.String(blobStore.options.EndpointResolverURI)
 			o.UsePathStyle = true
 		}
+		o.HTTPSignerV4 = &headerStripSigner{inner: v4.NewSigner()}
 	})
 	return &s3BlobClient{store: blobStore, ctx: ctx, client: client}, nil
 }
